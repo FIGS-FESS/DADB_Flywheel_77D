@@ -1,6 +1,6 @@
 /* Title: SASB Single Axis FLoator Test Code
  * Author: Tyler Larson
- * Purpose: Through use of a PID controller a current sensor and a displacement sensor, the code manipulates a motor driver to hover a plate.
+ * Purpose: Through use of a PID controller a current sensor and a displacement sensor, the code controls both axis of the top bearings of the flywheel.
  */
 
 /*
@@ -102,24 +102,13 @@ interrupt void epwm2_isr();
 
 //Definition of the X1 instance of the position sensor structure
 position X1;    //Variable used to store the PID math variables for the x axis displacement sensor
-position Y1;
+position Y1;    //Variable used to store the PID math variables for the y axis displacement sensor
 
 //Definition of the current coil structure
 current C1;     //Variable used to store the current control variables for coil 1
 current C2;     //Variable used to store the current control variables for coil 2
 current C3;     //Variable used to store the current control variables for coil 3
 current C4;     //Variable used to store the current control variables for coil 4
-
-//Acquisition time calibration
-    //*Used for Debug
-int AQSTime = 499;
-int AQUSFlag = 0;
-
-//X displacement sensor calibration
-    //*Used for Debug
-float xmax;
-float xmin;
-float xdiff;
 
 //Displacement sensor reading
 int x1_sample;  //Global for x1 displacement sensor reading *(Digitized)
@@ -146,6 +135,7 @@ float disp_offset = 0.0004411644;  //Conversion offset for displacement sensor *
 //Displacement to current ratio
     //*Make this a define
     //*First add it into the displacement struct
+    //*Should this change in SADB/DADB?
 float disp_to_current = 2.2;  //Scales the PID output to current *(Meters/Amp)
 
 //Current sensors readings
@@ -166,6 +156,7 @@ float current_min = -10; //Min current for operation *(Amps)
 /*
  * Main
  */
+
 void main(void){
     //Main Initialization function for the 77D
     InitSysCtrl();
@@ -175,28 +166,39 @@ void main(void){
 
     //Setup output pins
     EALLOW;
-    GpioCtrlRegs.GPBPUD.bit.GPIO40 = 0;    
-    GpioDataRegs.GPBSET.bit.GPIO40 = 1;
-    GpioCtrlRegs.GPBGMUX1.bit.GPIO40 = 0;
-    GpioCtrlRegs.GPBDIR.bit.GPIO40 = 1;
-    GpioDataRegs.GPBCLEAR.bit.GPIO40 = 1;
-    GpioCtrlRegs.GPBPUD.bit.GPIO39 = 0;
-    GpioDataRegs.GPBSET.bit.GPIO39 = 1;
-    GpioCtrlRegs.GPBGMUX1.bit.GPIO39 = 0;
-    GpioCtrlRegs.GPBDIR.bit.GPIO39 = 1;
-    GpioDataRegs.GPBCLEAR.bit.GPIO39 = 1;
-    GpioCtrlRegs.GPBGMUX1.bit.GPIO34 = 0;
-    GpioCtrlRegs.GPBDIR.bit.GPIO34 = 1;
-    GpioDataRegs.GPBCLEAR.bit.GPIO34 = 1;
-    GpioCtrlRegs.GPBDIR.bit.GPIO44 = 1;
-    GpioDataRegs.GPBCLEAR.bit.GPIO44 = 1;
-    GpioCtrlRegs.GPBDIR.bit.GPIO45 = 1;
-    GpioDataRegs.GPBCLEAR.bit.GPIO45 = 1;
+    
+    //Pin 89, Used to clock how long the displacement if statement in the main loop takes
+    GpioCtrlRegs.GPBPUD.bit.GPIO40 = 0;     //Leaves pull up resistor on pin
+    GpioDataRegs.GPBSET.bit.GPIO40 = 1;     //Sets the pin high
+    GpioCtrlRegs.GPBGMUX1.bit.GPIO40 = 0;   //Sets the pins to default mux
+    GpioCtrlRegs.GPBDIR.bit.GPIO40 = 1;     //Sets the pin to output
+    GpioDataRegs.GPBCLEAR.bit.GPIO40 = 1;   //Sets the pin low
+
+    //PWM_H Pins
+        //Pin 86, PWM_H for C3
+    GpioCtrlRegs.GPBPUD.bit.GPIO39 = 0;     //Leaves the pull up resistor on the pin
+    GpioDataRegs.GPBSET.bit.GPIO39 = 1;     //Sets the pin high
+    GpioCtrlRegs.GPBGMUX1.bit.GPIO39 = 0;   //Sets the pin to default mux
+    GpioCtrlRegs.GPBDIR.bit.GPIO39 = 1;     //Sets the pin to output
+    GpioDataRegs.GPBCLEAR.bit.GPIO39 = 1;   //Sets the pin low
+        //Pin 88, PWM_H for C2
+    GpioCtrlRegs.GPBGMUX1.bit.GPIO34 = 0;   //Sets the pin to default mux
+    GpioCtrlRegs.GPBDIR.bit.GPIO34 = 1;     //Sets the pin to output
+    GpioDataRegs.GPBCLEAR.bit.GPIO34 = 1;   //Sets the pin to low
+        //Pin 90, PWM_H for C3
+    GpioCtrlRegs.GPBDIR.bit.GPIO44 = 1;     //Sets the pin to output
+    GpioDataRegs.GPBCLEAR.bit.GPIO44 = 1;   //Sets the pin to low
+        //Pin 92, PWM_H for C4
+    GpioCtrlRegs.GPBDIR.bit.GPIO45 = 1;     //Sets the pin to output
+    GpioDataRegs.GPBCLEAR.bit.GPIO45 = 1;   //Sets the pin to low
+    
     EDIS;
 
     //Setup X1 variable
     SetupPosition(&X1);
     SetupPosition(&Y1);
+    
+    //Sets the location of the global for each sample
     X1.sample_loc = &x1_sample;
     Y1.sample_loc = &y1_sample;
 
@@ -205,14 +207,21 @@ void main(void){
     SetupCoil(&C2);
     SetupCoil(&C3);
     SetupCoil(&C4);
+    
+    //Sets the location of the global for each sample
     C1.sample_loc = &c1_sample;
     C2.sample_loc = &c2_sample;
     C3.sample_loc = &c3_sample;
     C4.sample_loc = &c4_sample;
+    
+    //Displacement sensor influences for each coil
     C1.x_influence = 1;
     C2.x_influence = -1;
     C3.y_influence = 1;
     C4.y_influence = -1;
+
+    //GPIO offsets
+        //These are found by mapping between the physical pins and their GPIO address in the GPIO registers
     C1.gpio_offset = 2;
     C2.gpio_offset = 7;
     C3.gpio_offset = 12;
@@ -282,7 +291,7 @@ void main(void){
             x1_update = 0 ;
             GpioDataRegs.GPBTOGGLE.bit.GPIO40 = 1;  //Used to clock how long this if statement takes
             Position_PID_Cntrl(&X1);    //PID control for X1 sensor
-            Position_PID_Cntrl(&Y1);
+            Position_PID_Cntrl(&Y1);    //PID control for Y1 sensor
             current_target(&C1, &X1, &Y1);  //Displacement to Current target for coil 1
             current_target(&C2, &X1, &Y1);  //Displacement to Current target for coil 2
             current_target(&C3, &X1, &Y1);  //Displacement to Current target for coil 3
@@ -292,26 +301,6 @@ void main(void){
             Bang_Bang_Cntrl(&C3);   //Current control function for coil 3
             Bang_Bang_Cntrl(&C4);   //Current control function for coil 4
             GpioDataRegs.GPBTOGGLE.bit.GPIO40 = 1;  //*OLD* Takes 1.0226 micro seconds
-
-        }
-
-        //If statement to facilitate the changing of the acqusition time of ADCB and SOC1
-        if(AQUSFlag){
-            EALLOW;
-            AdcbRegs.ADCSOC1CTL.bit.ACQPS = AQSTime;     //Set the sample window size for SOC1, 19=20 SysClkCycle
-            EDIS;
-            AQUSFlag=0;
-        }
-
-        //Simple if statement to capture the peak values of the x sensor, used durring initial debuging
-        if(x1_sample>xmax||x1_sample<xmin){
-            if(x1_sample>xmax){
-                xmax=x1_sample;
-            }
-            else{
-                xmin=x1_sample;
-            }
-            xdiff=xmax-xmin;
         }
     }
 }
@@ -321,6 +310,7 @@ void main(void){
  */
 
 void SetupPosition(position *sensor){
+    //Sets up the initial state for the displacement structure variables
     int i;      //Used as a simple loop counter
     sensor->target = x1_target;         //Feeds the position structure the location of sample global
     sensor->dt = x1_dt;                 //Feeds in the specific sample period for the sensor
@@ -339,11 +329,12 @@ void SetupPosition(position *sensor){
  */
 
 void SetupCoil(current *coil){
+    //Sets up the initial state for the coil structure variables
     coil->scale = current_scale;    //Sets the current conversion scale
     coil->offset = current_offset;  //Sets the current conversion offset
-    coil->x_influence = 0;          //Sets the current x value scaling constant
-    coil->y_influence = 0;          //Sets the current y value scaling constant
-    coil->bias = current_bias;      //Sets the current bias point
+    coil->x_influence = 0;          //Sets the current x value scaling constant to default of zero
+    coil->y_influence = 0;          //Sets the current y value scaling constant to default of zero
+    coil->bias = current_bias;      //Sets the current bias to the default define
 }
 
 /*
@@ -351,11 +342,6 @@ void SetupCoil(current *coil){
  */
 
 void Position_PID_Cntrl(position *sensor){
-    //Limit sensor jitter
-    if(*(sensor->sample_loc) < x1_cutoff){
-        *(sensor->sample_loc) = 0;  //Sets to zero if jitter is close
-    }
-
     //Read sample into structure
     sensor->sample = (*(sensor->sample_loc) * disp_scale) + disp_offset;    //*(Meters)
 
@@ -373,11 +359,9 @@ void Position_PID_Cntrl(position *sensor){
     sensor->d = (sensor->error - sensor->prev[sensor->prev_last]) * sensor->kd / sensor->dt;    
 
     //PID output
-    sensor->pid_out = sensor->p + sensor->i + sensor->d;    //*(Meters?)
+    sensor->pid_out = sensor->p + sensor->i + sensor->d;    //*(mm?)
 
     //clean up operations to set the array for the next round of PID calculations
-    /***May be better to have this in main or another function to
-        easily scale for additional stabilization bearings      ***/
     sensor->prev[sensor->prev_place] = sensor->error;   //Places the current rounds error into the memory array
     sensor->prev_last = sensor->prev_place;     //Progresses the placement variable for the "last" location to the current place
     sensor->prev_place = (prev_size - 1) & (sensor->prev_place + 1);    //Progresses the current location variable while using the bitwise math to limit and loop the variable
@@ -399,6 +383,7 @@ void current_target(current *coil, position *x_disp_sensor, position *y_disp_sen
             temp = current_min;     //Limits the target current to the min value
         }
     }
+    //Sets the target for the coil
     coil->target = temp; //*(Amps)
 }
 
@@ -407,35 +392,19 @@ void current_target(current *coil, position *x_disp_sensor, position *y_disp_sen
  */
 
 void Bang_Bang_Cntrl(current *coil){
+    //Conversion of ADC current reading into Amps
     coil->sample = (*(coil->sample_loc) * coil->scale) + coil->offset;  //*(Amps)
 
     //Initial error calculation between target and sampled current
     coil->error = coil->sample - coil->target;
 
-    //Moves the error to the PID output variable, allows for future integration of a PID control for current to PWM
-    //i1_pid_out = i1_error;
-
     //Run P_H pin high or low depending on error
     if(coil->error < 0){
-        GpioDataRegs.GPBSET.all |= 1 << coil->gpio_offset;     //Pin 88, This is Tied to the P_H pin for one of the Pololu's
+        GpioDataRegs.GPBSET.all |= 1 << coil->gpio_offset;     //This is Tied to the P_H pin for one of the Pololu's
     }
     else{
-        GpioDataRegs.GPBCLEAR.all |= 1 << coil->gpio_offset;   //Pin 88, This is Tied to the P_H pin for one of the Pololu's
+        GpioDataRegs.GPBCLEAR.all |= 1 << coil->gpio_offset;   //This is Tied to the P_H pin for one of the Pololu's
     }
-    /*  Include when ready for PWM
-    //Scales the current demand to a PWM duty cycle
-    pwm_duty_cycle = i_pid_out * pwm_scale;
-
-    //Logic flow to limit PWM min and max values
-    if(pwm_duty_cycle < 0){
-        pwm_duty_cycle = 0;
-    }
-    else{
-        if(pwm_duty_cycle > pwm_period){
-            pwm_duty_cycle = pwm_period;
-        }
-    }
-     */
 }
 
 /*
@@ -450,6 +419,8 @@ void InitADCPart1(){
     CpuSysRegs.PCLKCR13.bit.ADC_A = 1;
     CpuSysRegs.PCLKCR13.bit.ADC_B = 1;
 
+    //Initial setup function for ADCs, calibrates them to factory state
+        /***Find this function in the F2837xD_ADC.c file***/
     AdcSetMode(ADC_ADCA, ADC_RESOLUTION_12BIT, ADC_SIGNALMODE_SINGLE);
     AdcSetMode(ADC_ADCB, ADC_RESOLUTION_12BIT, ADC_SIGNALMODE_SINGLE);
 
@@ -519,7 +490,6 @@ void InitADCPart2(){
 void InitEPwm(){
     EALLOW;
     CpuSysRegs.PCLKCR0.bit.TBCLKSYNC = 0;   //Disable the Time Base Clk
-    //EDIS;
 
     //Enable Clk for PWM
     CpuSysRegs.PCLKCR2.bit.EPWM1 = 1;   //Enable ePWM1 CLK
@@ -528,12 +498,8 @@ void InitEPwm(){
     //Time Base Controls for ePWM1
     EPwm1Regs.TBCTL.bit.PHSEN = 0;      //Disable loading Counter register from Phase register
     EPwm1Regs.TBCTL.bit.PRDLD = 0;      //A shadow register is used to write to the Period register
-    //EPwm1Regs.TBCTL.bit.SYNCOSEL      //Leave at default value
-    //EPwm1Regs.TBCTL.bit.SWFSYNC       //Leave at default value
     EPwm1Regs.TBCTL.bit.HSPCLKDIV = 0;  //High speed Time Base Prescale, 0="/1"
     EPwm1Regs.TBCTL.bit.CLKDIV = 0;     //Time Base Clock Prescale, 0="/1"
-    //EPwm1Regs.TBCTL.bit.PHSDIR        //Leave at default value
-    //EPwm1Regs.TBCTL.bit.FREE_SOFT     //Leave at default value
     EPwm1Regs.TBCTL.bit.CTRMODE = 3;    //Set counter mode, 3=freeze counter
 
     //Set ePWM1 counter to 0
@@ -563,12 +529,8 @@ void InitEPwm(){
     //Time Base Controls for ePWM2
     EPwm2Regs.TBCTL.bit.PHSEN = 0;      //Disable loading Counter register from Phase register
     EPwm2Regs.TBCTL.bit.PRDLD = 0;      //A shadow register is used to write to the Period register
-    //EPwm2Regs.TBCTL.bit.SYNCOSEL      //Leave at default value
-    //EPwm2Regs.TBCTL.bit.SWFSYNC       //Leave at default value
     EPwm2Regs.TBCTL.bit.HSPCLKDIV = 0;  //High speed Time Base Prescale, 0="/1"
     EPwm2Regs.TBCTL.bit.CLKDIV = 0;     //Time Base Clock Prescale, 0="/1"
-    //EPwm2Regs.TBCTL.bit.PHSDIR        //Leave at default value
-    //EPwm2Regs.TBCTL.bit.FREE_SOFT     //Leave at default value
     EPwm2Regs.TBCTL.bit.CTRMODE = 3;    //Set counter mode, 3=freeze counter
 
     //Set ePWM2 counter to 0
@@ -675,30 +637,3 @@ interrupt void adcb2_isr(){
     //Acknowledge the interrupt
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP10;    //Acknowledges the interrupt in the PIE table for ADCB interrupt 2
 }
-
-/*
- * ePWM1 ISR
- */
-    //*Not enabled, doesn't do anything
-    //*Kept in case we want to
-interrupt void epwm1_isr(){
-    //Clear the interrupt flag
-    EPwm1Regs.ETCLR.bit.INT=1;
-
-    //Acknowledge the interrupt
-    PieCtrlRegs.PIEACK.all=PIEACK_GROUP3;
-}
-
-/*
- * ePWM2 ISR
- */
-    //*Not enabled, doesn't do anything
-    //*Kept in case we want to
-interrupt void epwm2_isr(){
-    //Clear the interrupt flag
-    EPwm2Regs.ETCLR.bit.INT=1;
-
-    //Acknowledge the interrupt
-    PieCtrlRegs.PIEACK.all=PIEACK_GROUP3;
-}
-
