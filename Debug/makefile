@@ -24,8 +24,8 @@ ORDERED_OBJS += \
 "./main.obj" \
 $(GEN_CMDS__FLAG) \
 -l"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_common/cmd/2837xD_RAM_lnk_cpu1.cmd" \
--l"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_headers/cmd/F2837xD_Headers_nonBIOS_cpu1.cmd" \
 -l"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/lib/rts2800_fpu32.lib" \
+-l"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_headers/cmd/F2837xD_Headers_nonBIOS_cpu1.cmd" \
 
 -include ../makefile.init
 
@@ -132,33 +132,33 @@ endif
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXE_OUTPUTS += \
-SADB_Flywheel_77D.out \
+DADB_Flywheel_77D.out \
 
 EXE_OUTPUTS__QUOTED += \
-"SADB_Flywheel_77D.out" \
+"DADB_Flywheel_77D.out" \
 
 BIN_OUTPUTS += \
-SADB_Flywheel_77D.hex \
+DADB_Flywheel_77D.hex \
 
 BIN_OUTPUTS__QUOTED += \
-"SADB_Flywheel_77D.hex" \
+"DADB_Flywheel_77D.hex" \
 
 
 # All Target
 all: $(OBJS) $(GEN_CMDS)
-	@$(MAKE) --no-print-directory -Onone "SADB_Flywheel_77D.out"
+	@$(MAKE) --no-print-directory -Onone "DADB_Flywheel_77D.out"
 
 # Tool invocations
-SADB_Flywheel_77D.out: $(OBJS) $(GEN_CMDS)
+DADB_Flywheel_77D.out: $(OBJS) $(GEN_CMDS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: C2000 Linker'
-	"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/bin/cl2000" -v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 --define=CPU1 -g --diag_warning=225 --diag_wrap=off --display_error_number -z -m"SADB_Flywheel_77D.map" --stack_size=0x200 --warn_sections -i"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/lib" -i"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_common/cmd" -i"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_headers/cmd" -i"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/include" --reread_libs --diag_wrap=off --display_error_number --xml_link_info="SADB_Flywheel_77D_linkInfo.xml" --entry_point=code_start --rom_model -o "SADB_Flywheel_77D.out" $(ORDERED_OBJS)
+	"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/bin/cl2000" -v28 -ml -mt --cla_support=cla1 --float_support=fpu32 --tmu_support=tmu0 --vcu_support=vcu2 --define=CPU1 -g --diag_warning=225 --diag_wrap=off --display_error_number -z -m"DADB_Flywheel_77D.map" --stack_size=0x200 --warn_sections -i"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/lib" -i"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_common/cmd" -i"C:/ti/controlSUITE/device_support/F2837xD/v210/F2837xD_headers/cmd" -i"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/include" --reread_libs --diag_wrap=off --display_error_number --xml_link_info="DADB_Flywheel_77D_linkInfo.xml" --entry_point=code_start --rom_model -o "DADB_Flywheel_77D.out" $(ORDERED_OBJS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
-SADB_Flywheel_77D.hex: $(EXE_OUTPUTS)
+DADB_Flywheel_77D.hex: $(EXE_OUTPUTS)
 	@echo 'Invoking: C2000 Hex Utility'
-	"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/bin/hex2000"  -o "SADB_Flywheel_77D.hex" $(EXE_OUTPUTS__QUOTED)
+	"C:/ti/ccsv7/tools/compiler/ti-cgt-c2000_16.9.3.LTS/bin/hex2000"  -o "DADB_Flywheel_77D.hex" $(EXE_OUTPUTS__QUOTED)
 	@echo 'Finished building: $@'
 	@echo ' '
 

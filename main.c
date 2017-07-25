@@ -573,8 +573,8 @@ void PIEMap(){
     PieVectTable.ADCB2_INT=&adcb2_isr;
 
     //PIE mappings for ePWM interrupts
-    PieVectTable.EPWM1_INT=&epwm1_isr;
-    PieVectTable.EPWM2_INT=&epwm2_isr;
+    //PieVectTable.EPWM1_INT=&epwm1_isr;
+    //PieVectTable.EPWM2_INT=&epwm2_isr;
 
     EDIS;
 }
