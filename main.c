@@ -20,7 +20,7 @@
 #define sample_cycles (20 - 1)  //Note* only change the first number, the 1 accounts for the minimum
 
 //Current Bias current for the SADB to help stabilize
-#define current_bias .5   //Set arbitrarily as a middle point in the range of currents we antisipate to use
+#define current_bias .5   //Set arbitrarily as a middle point in the range of currents we anticipate to use
 
 //Current sensor conversion scale       *Calibrated as of 2017/07/20
 #define current_scale (10.168070782 * 3.3 / 4096)//Conversion scale for current sensor *(Amps/Volt)
@@ -103,6 +103,8 @@ interrupt void epwm2_isr();
 //Definition of the X1 instance of the position sensor structure
 position X1;    //Variable used to store the PID math variables for the x axis displacement sensor
 position Y1;    //Variable used to store the PID math variables for the y axis displacement sensor
+position X2;
+position Y2;
 
 //Definition of the current coil structure
 current C1;     //Variable used to store the current control variables for coil 1
@@ -113,6 +115,8 @@ current C4;     //Variable used to store the current control variables for coil 
 //Displacement sensor reading
 int x1_sample;  //Global for x1 displacement sensor reading *(Digitized)
 int y1_sample;  //Global for y1 displacement sensor reading *(Digitized)
+int x2_sample;
+int y2_sample;
 
 //Cutoff value for X displacement
     //*Used for Debug
@@ -152,6 +156,14 @@ float current_max = 10;  //Max current for operation *(Amps)
 
 //Minimum Current
 float current_min = -10; //Min current for operation *(Amps)
+
+//Rotor diameter deviation variables
+float xmax = 0;
+float xmin = 3;
+float xdelta;
+float ymax = 0;
+float ymin = 3;
+float ydelta;
 
 /*
  * Main
@@ -197,10 +209,14 @@ void main(void){
     //Setup X1 variable
     SetupPosition(&X1);
     SetupPosition(&Y1);
+    SetupPosition(&X2);
+    SetupPosition(&Y2);
     
     //Sets the location of the global for each sample
     X1.sample_loc = &x1_sample;
     Y1.sample_loc = &y1_sample;
+    X2.sample_loc = &x2_sample;
+    Y2.sample_loc = &y2_sample;
 
     //Setup C1 variable
     SetupCoil(&C1);
@@ -292,6 +308,8 @@ void main(void){
             GpioDataRegs.GPBTOGGLE.bit.GPIO40 = 1;  //Used to clock how long this if statement takes
             Position_PID_Cntrl(&X1);    //PID control for X1 sensor
             Position_PID_Cntrl(&Y1);    //PID control for Y1 sensor
+            Position_PID_Cntrl(&X2);    //PID control for X2 sensor
+            Position_PID_Cntrl(&Y2);    //PID control for Y2 sensor
             current_target(&C1, &X1, &Y1);  //Displacement to Current target for coil 1
             current_target(&C2, &X1, &Y1);  //Displacement to Current target for coil 2
             current_target(&C3, &X1, &Y1);  //Displacement to Current target for coil 3
@@ -301,6 +319,24 @@ void main(void){
             Bang_Bang_Cntrl(&C3);   //Current control function for coil 3
             Bang_Bang_Cntrl(&C4);   //Current control function for coil 4
             GpioDataRegs.GPBTOGGLE.bit.GPIO40 = 1;  //*OLD* Takes 1.0226 micro seconds
+            if((X2.sample > xmax) || (X2.sample < xmin)){
+                if(X2.sample > xmax){
+                    xmax = X2.sample;
+                }
+                else{
+                    xmin = X2.sample;
+                }
+                xdelta = xmax - xmin;
+            }
+            if((Y2.sample > ymax) || (Y2.sample < ymin)){
+                if(Y2.sample > ymax){
+                    ymax = Y2.sample;
+                }
+                else{
+                    ymin = Y2.sample;
+                }
+                ydelta = ymax - ymin;
+            }
         }
     }
 }
@@ -428,13 +464,13 @@ void InitADCPart1(){
     AdcaRegs.ADCCTL1.bit.INTPULSEPOS = 1;   //Sets Interrupt pulse to trigger after conversion
     AdcaRegs.ADCCTL2.bit.SIGNALMODE = 0;    //Single Ended, not Differential
     AdcaRegs.ADCCTL2.bit.RESOLUTION = 0;    //Sets resolution to 12 bits, 1=16 bits
-    AdcaRegs.ADCCTL2.bit.PRESCALE = 6;      //Sets the Prescale of the ADC, 6=1/4   *Be careful with value, if it is to low, issues with sample value will occur
+    AdcaRegs.ADCCTL2.bit.PRESCALE = 8;      //Sets the Prescale of the ADC, 6=1/4   *Be careful with value, if it is to low, issues with sample value will occur
 
     //Initialization Settings for ADC B
     AdcbRegs.ADCCTL1.bit.INTPULSEPOS = 1;   //Sets Interrupt pulse to trigger after conversion
     AdcbRegs.ADCCTL2.bit.SIGNALMODE = 0;    //Single Ended, not Differential
     AdcbRegs.ADCCTL2.bit.RESOLUTION = 0;    //Sets resolution to 12 bits, 1=16 bits
-    AdcbRegs.ADCCTL2.bit.PRESCALE = 6;      //Sets the Prescale of the ADC, 6=1/4   *Be careful with value, if it is to low, issues with sample value will occur
+    AdcbRegs.ADCCTL2.bit.PRESCALE = 8;      //Sets the Prescale of the ADC, 6=1/4   *Be careful with value, if it is to low, issues with sample value will occur
 
     AdcaRegs.ADCCTL1.bit.ADCPWDNZ = 1;      //Powers up all of the analog circuitry
     AdcbRegs.ADCCTL1.bit.ADCPWDNZ = 1;      //Powers up all of the analog circuitry
@@ -475,7 +511,13 @@ void InitADCPart2(){
     AdcbRegs.ADCSOC1CTL.bit.TRIGSEL = 8;    //Set the Trigger for SOC1, 8=ePWM2
     AdcbRegs.ADCSOC1CTL.bit.CHSEL = 1;      //Set the channel for SOC1 to convert, 1=ADCBIN1
     AdcbRegs.ADCSOC1CTL.bit.ACQPS = 19;     //Set the sample window size for SOC1, 19=20 SysClkCycles
-    AdcbRegs.ADCINTSEL1N2.bit.INT2SEL = 1;  //Set EOCx to trigger ADCINT2, 1=EOC1
+    AdcbRegs.ADCSOC2CTL.bit.TRIGSEL = 8;    //Set the Trigger for SOC2, 8=ePWM2
+    AdcbRegs.ADCSOC2CTL.bit.CHSEL = 2;      //Set the channel for SOC2 to convert, 0=ADCBIN0
+    AdcbRegs.ADCSOC2CTL.bit.ACQPS = 19;     //Set the sample window size for SOC2, 19=20 SysClkCycles
+    AdcbRegs.ADCSOC3CTL.bit.TRIGSEL = 8;    //Set the Trigger for SOC3, 8=ePWM2
+    AdcbRegs.ADCSOC3CTL.bit.CHSEL = 3;      //Set the channel for SOC3 to convert, 1=ADCBIN1
+    AdcbRegs.ADCSOC3CTL.bit.ACQPS = 19;     //Set the sample window size for SOC3, 19=20 SysClkCycles
+    AdcbRegs.ADCINTSEL1N2.bit.INT2SEL = 3;  //Set EOCx to trigger ADCINT2, 1=EOC1
     AdcbRegs.ADCINTSEL1N2.bit.INT2E = 1;    //Enable/Disable ADCINT2
     AdcbRegs.ADCINTSEL1N2.bit.INT2CONT = 0; //Enable/Disable Continuous Mode
     AdcbRegs.ADCINTFLGCLR.bit.ADCINT2 = 1;  //Clears ADCINT2 Flag
@@ -627,6 +669,8 @@ interrupt void adcb2_isr(){
     //Write the sample to the global variable
     x1_sample = AdcbResultRegs.ADCRESULT0;  //Reads the result register of SOC0
     y1_sample = AdcbResultRegs.ADCRESULT1;  //Reads the result register of SOC1
+    x2_sample = AdcbResultRegs.ADCRESULT2;  //Reads the result register of SOC2
+    y2_sample = AdcbResultRegs.ADCRESULT3;  //Reads the result register of SOC3
 
     //Set the update flag
     x1_update = 1;  //Triggers the if statement in the main loop for PID operations
