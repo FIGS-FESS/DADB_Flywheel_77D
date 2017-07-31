@@ -28,6 +28,12 @@
 //Current sensor conversion offset      *Calibrated as of 2017/07/20
 #define current_offset -13.45198481 //Conversion offset for current sensor *(Amps)
 
+//Displacement sensor conversion scale
+#define disp_scale = .9540446743 * 3.3 / 4096   //Conversion scale for displacement sensor *(Millimeters/Volt)
+
+//Displacement sensor conversion offset
+#define disp_offset = 0  //Conversion offset for displacement sensor *(Millieters)
+
 //Displacement sensor sample period
 #define x1_dt 0.1 //*(MilliSeconds)
 
@@ -49,6 +55,8 @@ typedef struct position_sensor_struct{
     float sample;           /*!< Sample value, *(mm) */
     float target;           /*!< Target Displacement value *(mm) */
     float error;            /*!< Error for PID controls *(mm) */
+    float scale;            /*!< Sensor specific scale value */
+    float offset;           /*!< Sensor specific offset value */
     float dt;               /*!< Time period for PID control *(ms) */
     float kp;               /*!< Proportional Constant */
     float p;                /*!< Proportional calculated value */
@@ -126,15 +134,7 @@ int x1_cutoff = 0;  //Debuging purposes, clean out later
     /* Update name to account for more than just x being updated */
 int x1_update;  //Flag for new displacement sensor readings
 
-//Displacement sensor conversion scale
-    //*Make this a define
-    //*Bring this variable into the struct
-float disp_scale = 1.079757 * 3.3 / 4096;   //Conversion scale for displacement sensor *(Millimeters/Volt)
 
-//Displacement sensor conversion offset
-    //*Make this a define
-    //*Bring this variable into the struct
-float disp_offset = 0.0004411644;  //Conversion offset for displacement sensor *(Millieters)
 
 //Displacement to current ratio
     //*Make this a define
@@ -217,6 +217,16 @@ void main(void){
     Y1.sample_loc = &y1_sample;
     X2.sample_loc = &x2_sample;
     Y2.sample_loc = &y2_sample;
+
+    //Sets the correct offset and scaling factor for each displacement sensor
+    X1.scale = 0.9486971627;
+    X1.offset = 0;
+    Y1.scale = 0.9594528121;
+    Y1.offset = 0;
+    X2.scale = 0.9540446743;
+    X2.offset = 0;
+    Y2.scale = 1.001785409;
+    Y2.offset = 0;
 
     //Setup C1 variable
     SetupCoil(&C1);
@@ -319,21 +329,21 @@ void main(void){
             Bang_Bang_Cntrl(&C3);   //Current control function for coil 3
             Bang_Bang_Cntrl(&C4);   //Current control function for coil 4
             GpioDataRegs.GPBTOGGLE.bit.GPIO40 = 1;  //*OLD* Takes 1.0226 micro seconds
-            if((X2.sample > xmax) || (X2.sample < xmin)){
-                if(X2.sample > xmax){
-                    xmax = X2.sample;
+            if(((X1.sample - X2.sample) > xmax) || ((X1.sample - X2.sample) < xmin)){
+                if((X1.sample - X2.sample) > xmax){
+                    xmax = X1.sample - X2.sample;
                 }
                 else{
-                    xmin = X2.sample;
+                    xmin = X1.sample - X2.sample;
                 }
                 xdelta = xmax - xmin;
             }
-            if((Y2.sample > ymax) || (Y2.sample < ymin)){
-                if(Y2.sample > ymax){
-                    ymax = Y2.sample;
+            if(((Y1.sample - Y2.sample) > ymax) || ((Y1.sample - Y2.sample) < ymin)){
+                if((Y1.sample - Y2.sample) > ymax){
+                    ymax = Y1.sample - Y2.sample;
                 }
                 else{
-                    ymin = Y2.sample;
+                    ymin = Y1.sample - Y2.sample;
                 }
                 ydelta = ymax - ymin;
             }
@@ -379,7 +389,7 @@ void SetupCoil(current *coil){
 
 void Position_PID_Cntrl(position *sensor){
     //Read sample into structure
-    sensor->sample = (*(sensor->sample_loc) * disp_scale) + disp_offset;    //*(Meters)
+    sensor->sample = (*(sensor->sample_loc) * sensor->scale) + sensor->offset;    //*(Meters)
 
     //Initial error calculation between target and sample values
     sensor->error = sensor->sample - sensor->target;
