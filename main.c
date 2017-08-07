@@ -45,6 +45,19 @@
 #define ki_init 0  //Default to 0 for initial tuning
 #define kd_init 0  //Default to 0 for initial tuning
 
+//State Transition States Enumeration
+typedef enum SPI_state {Idle_state,
+                        Sampling_state,
+                        Start_state,
+                        Null_state,
+                        Data_state,
+                        Error_state,
+                        Warning_state,
+                        CRC_state,
+                        Ignore_state
+}SPI_state;
+
+
 /*
  * Structures
  */
@@ -99,10 +112,10 @@ void InitADCPart2();
 void InitEPwm();
 void PIEMap();
 void EPwmStart();
+int Check_CRC(uint32_t CRC_check, int CRC_value);
 interrupt void adca1_isr();
 interrupt void adcb2_isr();
-interrupt void epwm1_isr();
-interrupt void epwm2_isr();
+interrupt void epwm3_isr();
 
 /*
  * Globals
@@ -165,6 +178,22 @@ float ymax = 0;
 float ymin = 3;
 float ydelta;
 
+//SPI State Variables
+SPI_state c_state = Idle_state; //Variable for the current state
+SPI_state n_state = Idle_state;  //Variable for the next state
+
+//SPI Storage Variables
+uint32_t CRC_check;
+uint32_t Data_value;
+bool Error_flag = 0;
+int Warning_flag = 0;
+int CRC_value = 0x0043;
+bool CRC_result = 0;
+int Data_count = 0;
+int CRC_count = 0;
+bool miso;
+
+
 /*
  * Main
  */
@@ -186,8 +215,17 @@ void main(void){
     GpioCtrlRegs.GPBDIR.bit.GPIO40 = 1;     //Sets the pin to output
     GpioDataRegs.GPBCLEAR.bit.GPIO40 = 1;   //Sets the pin low
 
+    //MISO Pin for Rotational Encoder
+    GpioCtrlRegs.GPBPUD.bit.GPIO41 = 0;
+    GpioCtrlRegs.GPBGMUX1.bit.GPIO41 = 0;
+    GpioCtrlRegs.GPBDIR.bit.GPIO41 = 0;
+
+    //Current State Output Pins
+    GpioCtrlRegs.GPBDIR.all = (uint32_t)0x7 << 16;    //GPIO 48,49 and 50
+    GpioDataRegs.GPACLEAR.all = (uint32_t)0x7 << 16;
+
     //PWM_H Pins
-        //Pin 86, PWM_H for C3
+        //Pin 86, PWM_H for C1
     GpioCtrlRegs.GPBPUD.bit.GPIO39 = 0;     //Leaves the pull up resistor on the pin
     GpioDataRegs.GPBSET.bit.GPIO39 = 1;     //Sets the pin high
     GpioCtrlRegs.GPBGMUX1.bit.GPIO39 = 0;   //Sets the pin to default mux
@@ -206,6 +244,11 @@ void main(void){
     
     EDIS;
 
+    //Enable output of ePWM signals to Pins
+    InitEPwm1Gpio();
+    InitEPwm2Gpio();
+    InitEPwm3Gpio();
+
     //Setup X1 variable
     SetupPosition(&X1);
     SetupPosition(&Y1);
@@ -218,14 +261,18 @@ void main(void){
     X2.sample_loc = &x2_sample;
     Y2.sample_loc = &y2_sample;
 
+    //Sets the target for X1 and Y1
+    X1.target = 1.6;
+    Y1.target = 1.5;
+
     //Sets the correct offset and scaling factor for each displacement sensor
-    X1.scale = 0.9486971627;
+    X1.scale = 0.00076433121;
     X1.offset = 0;
-    Y1.scale = 0.9594528121;
+    Y1.scale = 0.00077299665;
     Y1.offset = 0;
-    X2.scale = 0.9540446743;
+    X2.scale = 0.000768639508;
     X2.offset = 0;
-    Y2.scale = 1.001785409;
+    Y2.scale = 0.000807102502;
     Y2.offset = 0;
 
     //Setup C1 variable
@@ -241,8 +288,8 @@ void main(void){
     C4.sample_loc = &c4_sample;
     
     //Displacement sensor influences for each coil
-    C1.x_influence = 1;
-    C2.x_influence = -1;
+    C1.x_influence = -1;
+    C2.x_influence = 1;
     C3.y_influence = 1;
     C4.y_influence = -1;
 
@@ -280,10 +327,6 @@ void main(void){
     //ADC setup Part 2
     InitADCPart2();
 
-    //Enable output of ePWM signals to Pins
-    InitEPwm1Gpio();
-    InitEPwm2Gpio();
-
     //Enable The Interrupts
     IER |=(M_INT1 | M_INT3 | M_INT10); //Enable Groups 1,3 and 10
 
@@ -291,6 +334,7 @@ void main(void){
     PieCtrlRegs.PIEIER1.bit.INTx1 = 1;  //Enable ADCA1 interrupt
     PieCtrlRegs.PIEIER3.bit.INTx1 = 1;  //Enable ePWM1 interrupt
     PieCtrlRegs.PIEIER3.bit.INTx2 = 1;  //Enable ePWM2 interrupt
+    PieCtrlRegs.PIEIER3.bit.INTx3 = 1;
     PieCtrlRegs.PIEIER10.bit.INTx6 = 1; //Enable ADCB2 interrupt
 
     //Enable interrupts
@@ -546,6 +590,7 @@ void InitEPwm(){
     //Enable Clk for PWM
     CpuSysRegs.PCLKCR2.bit.EPWM1 = 1;   //Enable ePWM1 CLK
     CpuSysRegs.PCLKCR2.bit.EPWM2 = 1;   //Enable ePWM2 CLK
+    CpuSysRegs.PCLKCR2.bit.EPWM3 = 1;   //Enable ePWM2 CLK
 
     //Time Base Controls for ePWM1
     EPwm1Regs.TBCTL.bit.PHSEN = 0;      //Disable loading Counter register from Phase register
@@ -608,6 +653,36 @@ void InitEPwm(){
     EPwm2Regs.AQCTLA.bit.CAU = 2;       //Action at A going up, 2=set_high
     EPwm2Regs.AQCTLA.bit.ZRO = 1;       //Action at zero, 1=clear
 
+    //Time Base Controls for ePWM3
+    EPwm3Regs.TBCTL.bit.PHSEN = 0;      //Disable loading Counter register from Phase register
+    EPwm3Regs.TBCTL.bit.PRDLD = 0;      //A shadow register is used to write to the Period register
+    EPwm3Regs.TBCTL.bit.HSPCLKDIV = 0;  //High speed Time Base Prescale, 0="/1"
+    EPwm3Regs.TBCTL.bit.CLKDIV = 0;     //Time Base Clock Prescale, 0="/1"
+    EPwm3Regs.TBCTL.bit.CTRMODE = 3;    //Set counter mode, 3=freeze counter
+
+    //Set ePWM3 counter to 0
+    EPwm3Regs.TBCTR = 0;    //Resets ePWM3 counter register
+
+    //Set ePWM3 period
+    EPwm3Regs.TBPRD = 99;     //Results in a period of 1/1 MHz 
+
+    //Disable ePWM3 phase sync
+    EPwm3Regs.TBPHS.bit.TBPHS = 0;
+
+    //Set the Compare A register
+    EPwm3Regs.CMPA.bit.CMPA = 49;     //Sets Compare A to a 50% duty cycle, arbitrary for now
+
+    //Action qualifier control
+    EPwm3Regs.AQCTLA.bit.CAU = 2;       //Action at A going up, 2=set_high
+    EPwm3Regs.AQCTLA.bit.PRD = 1;       //Action at period, 1=clear
+    EPwm3Regs.AQCTLA.bit.CBU = 0;
+    EPwm3Regs.AQCTLA.bit.ZRO = 0;
+
+    //Interrupt setup
+    EPwm3Regs.ETSEL.bit.INTSEL = 4;     //Sets interrupt to trigger on zero
+    EPwm3Regs.ETSEL.bit.INTEN = 1;      //Enable Interrupt
+    EPwm3Regs.ETPS.bit.INTPRD = 1;      //Generate an interrupt on every event
+
     //CPU clock enable
     CpuSysRegs.PCLKCR0.bit.TBCLKSYNC = 1;   //Renable the Time Base Clk
     EDIS;
@@ -625,8 +700,9 @@ void PIEMap(){
     PieVectTable.ADCB2_INT=&adcb2_isr;
 
     //PIE mappings for ePWM interrupts
-    //PieVectTable.EPWM1_INT=&epwm1_isr;
-    //PieVectTable.EPWM2_INT=&epwm2_isr;
+    //PieVectTable.EPWM1_INT = &epwm1_isr;
+    //PieVectTable.EPWM2_INT = &epwm2_isr;
+    PieVectTable.EPWM3_INT = &epwm3_isr;
 
     EDIS;
 }
@@ -645,8 +721,31 @@ void EPwmStart(){
     //Unfreeze ePWM to up count mode
     EPwm1Regs.TBCTL.bit.CTRMODE = 0;
     EPwm2Regs.TBCTL.bit.CTRMODE = 0;
+    EPwm3Regs.TBCTL.bit.CTRMODE = 0;
 
     EDIS;
+}
+
+/*
+ * CRC calculation function
+ */
+
+int Check_CRC(uint32_t data, int crc){
+    int buffer = 6;
+    int crc_poly = 0x43;
+    int i = 20 - 1;
+    data = data << buffer;
+    for(i; i > 0 ; i--){
+        if(data & (1<<i)){
+            data ^= crc_poly << i;
+        }
+    }
+    if(!(data) && crc){
+        return 0;
+    }
+    else{
+        return 1;
+    }
 }
 
 /*
@@ -690,4 +789,96 @@ interrupt void adcb2_isr(){
 
     //Acknowledge the interrupt
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP10;    //Acknowledges the interrupt in the PIE table for ADCB interrupt 2
+}
+
+/*
+ * ePWM3 ISR
+ */
+
+interrupt void epwm3_isr(){
+    //Progress the state to the next state
+    c_state = n_state;
+
+    GpioDataRegs.GPBTOGGLE.all = (uint32_t)c_state << 16;
+
+    //Read the miso pin
+    miso = GpioDataRegs.GPBDAT.bit.GPIO41;
+
+    switch(c_state){
+        case Idle_state:
+            if(miso == 0){
+                n_state = Sampling_state;
+            }
+            break;
+        case Sampling_state:
+            if(miso == 1){
+                n_state = Start_state;
+            }
+            break;
+        case Start_state:
+            if(miso == 0){
+                n_state = Null_state;
+            }
+            break;
+        case Null_state:
+            n_state = Data_state;
+            break;
+        case Data_state:
+            if(Data_count < 17){
+                CRC_check = (CRC_check << 1) + miso;
+                Data_count++;
+            }
+            else{
+                CRC_check = (CRC_check << 1) + miso;
+                n_state = Error_state;
+                Data_count = 0;
+            }
+            break;
+        case Error_state:
+            CRC_check = (CRC_check << 1) + miso;
+            if(miso == 0){
+                Error_flag = 1;
+            }
+            n_state = Warning_state;
+            break;
+        case Warning_state:
+            CRC_check = (CRC_check << 1) + miso;
+            Warning_flag += !(miso);
+            n_state = CRC_state;
+            break;
+        case CRC_state:
+            if(CRC_count < 5){
+                CRC_value = (CRC_value << 1) + miso;
+                CRC_count++;
+            }
+            else{
+                CRC_value = (CRC_value << 1) + miso;
+                CRC_result = Check_CRC(CRC_check, CRC_value);
+                if(!(CRC_result || Error_flag)){
+                    Data_value = (CRC_check >> 2) && 0x3fff;
+                }
+                else
+                {
+                    Data_value = 0x4000;
+                }
+                n_state = Idle_state;
+                EPwm3Regs.TBCTL.bit.CTRMODE = 3;
+            }
+            break;
+        case Ignore_state:
+            if(miso == 1){
+                n_state = Idle_state;
+                EALLOW;
+                EPwm3Regs.TBCTL.bit.CTRMODE = 3;
+                EDIS;
+            }
+            break;
+        }
+    GpioDataRegs.GPBCLEAR.all = (uint32_t)0x7 << 16;
+
+    //Clear the interrupt flag
+    EPwm3Regs.ETCLR.bit.INT = 1;
+
+    //Acknowledge the interrupt
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP3;
 }
