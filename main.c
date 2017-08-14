@@ -184,15 +184,16 @@ SPI_state n_state = Idle_state;  //Variable for the next state
 
 //SPI Storage Variables
 uint32_t CRC_check;
-uint32_t Data_value;
+float Data_value;
 bool Error_flag = 0;
 int Warning_flag = 0;
-int CRC_value = 0x0043;
+int CRC_value = 0;
 bool CRC_result = 0;
 int Data_count = 0;
 int CRC_count = 0;
 bool miso;
-
+float Rotation_percent;
+float Max_value = 0x3ffff;
 
 /*
  * Main
@@ -732,15 +733,15 @@ void EPwmStart(){
 
 int Check_CRC(uint32_t data, int crc){
     int buffer = 6;
-    int crc_poly = 0x43;
+    uint32_t crc_poly = 0x00000043;
     int i = 20 - 1;
     data = data << buffer;
-    for(i; i > 0 ; i--){
-        if(data & (1<<i)){
+    for(i=19; i > 0 ; i=i-1){
+        if(data & ((uint32_t)1<<(i+6))){
             data ^= crc_poly << i;
         }
     }
-    if(!(data) && crc){
+    if((int)(0x3f & (~(data))) && crc){
         return 0;
     }
     else{
@@ -784,6 +785,9 @@ interrupt void adcb2_isr(){
     //Set the update flag
     x1_update = 1;  //Triggers the if statement in the main loop for PID operations
 
+    EPwm3Regs.TBCTL.bit.CTRMODE = 0;
+
+
     //Clear the interrupt flag
     AdcbRegs.ADCINTFLGCLR.bit.ADCINT2=1;    //Clears ADCB interrupt 2
 
@@ -822,6 +826,7 @@ interrupt void epwm3_isr(){
             break;
         case Null_state:
             n_state = Data_state;
+            CRC_check = (CRC_check <<1) + miso;
             break;
         case Data_state:
             if(Data_count < 17){
@@ -831,38 +836,43 @@ interrupt void epwm3_isr(){
             else{
                 CRC_check = (CRC_check << 1) + miso;
                 n_state = Error_state;
+                if(miso == 0){
+                    Error_flag = 1;
+                }
+                else{
+                    Error_flag = 0;
+                }
                 Data_count = 0;
             }
             break;
         case Error_state:
             CRC_check = (CRC_check << 1) + miso;
-            if(miso == 0){
-                Error_flag = 1;
-            }
             n_state = Warning_state;
+            Warning_flag += !miso;
             break;
         case Warning_state:
-            CRC_check = (CRC_check << 1) + miso;
-            Warning_flag += !(miso);
+            CRC_value = (CRC_value << 1) + miso;
             n_state = CRC_state;
             break;
         case CRC_state:
-            if(CRC_count < 5){
+            if(CRC_count < 4){
                 CRC_value = (CRC_value << 1) + miso;
                 CRC_count++;
             }
             else{
+                n_state = Idle_state;
+                EPwm3Regs.TBCTL.bit.CTRMODE = 3;
                 CRC_value = (CRC_value << 1) + miso;
                 CRC_result = Check_CRC(CRC_check, CRC_value);
                 if(!(CRC_result || Error_flag)){
-                    Data_value = (CRC_check >> 2) && 0x3fff;
+                    Data_value = (CRC_check >> 2) & 0x0003ffff;
                 }
                 else
                 {
                     Data_value = 0x4000;
                 }
-                n_state = Idle_state;
-                EPwm3Regs.TBCTL.bit.CTRMODE = 3;
+                Rotation_percent = __divf32(Data_value,Max_value);
+                Rotation_percent = Rotation_percent * 360;
             }
             break;
         case Ignore_state:
