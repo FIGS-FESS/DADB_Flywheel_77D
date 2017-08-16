@@ -22,8 +22,8 @@ Pinouts:
   PWM Low and Dir should be pluged into one of the 3.3V pins on the board to keep them at 	logic high. This garentees that when the PWM High pin is toggled the 
 
 Reference Pins:
-  ADCA Clock Signal -> Pin 49 (ePWM1 Compair A)
-  ADCB Clock Signal -> Pin 53 (ePWM2 Compair A)
+  ADCA Clock Signal -> Pin 49 (ePWM1 Compare A)
+  ADCB Clock Signal -> Pin 53 (ePWM2 Compare A)
 
 Ussage:
   After the board is plugged in one should be able to debug the code. Both X and Y have individual PID loops that can be tuned. Each coil has a set bias current that can be changed. Each coil also has variable x/y sensor influences. This allows for moving the sensors without having to rewire or rewrite code.
