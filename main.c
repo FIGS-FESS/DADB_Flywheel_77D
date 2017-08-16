@@ -263,8 +263,8 @@ void main(void){
     Y2.sample_loc = &y2_sample;
 
     //Sets the target for X1 and Y1
-    X1.target = 1.6;
-    Y1.target = 1.5;
+    X1.target = 1.48;
+    Y1.target = 1.38;
 
     //Sets the correct offset and scaling factor for each displacement sensor
     X1.scale = 0.00076433121;
