@@ -215,10 +215,10 @@ void main(void){
     C4.sample_loc = &c4_sample;
     
     //Displacement sensor influences for each coil
-    C1.x_influence = 1;
-    C2.x_influence = -1;
-    C3.y_influence = 1;
-    C4.y_influence = -1;
+    C1.x_influence = -1;
+    C2.x_influence = 1;
+    C3.y_influence = -1;
+    C4.y_influence = 1;
 
     //GPIO offsets
         //These are found by mapping between the physical pins and their GPIO address in the GPIO registers
